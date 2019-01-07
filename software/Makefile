@@ -6,6 +6,7 @@
 ROOT_DIR:=$(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
 CCFLAGS=-std=c++14 -Wall -Ofast -pthread
+SUPPORT=./mcp3008/mcp3008Spi.cpp ./rpiPWM1/rpiPWM1.cpp ./mmapGpio/mmapGpio.cpp ./GPIOClass/GPIOClass.cpp
 
 prefix := /usr/local/
 
@@ -19,7 +20,7 @@ CFLAGS=${CCFLAGS}
 all: ${PROGRAMS}
 
 ${PROGRAMS}: ${SOURCES}
-	$(CXX) $(CFLAGS) -lArduiPi_OLED ./mcp3008/mcp3008Spi.cpp $@.cpp -o $@.exe
+	$(CXX) $(CFLAGS) -lArduiPi_OLED $(SUPPORT) $@.cpp -o $@.exe
 
 clean:
 	rm -rf $(PROGRAMS)

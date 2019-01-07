@@ -1,25 +1,21 @@
 #include "./mcp3008/mcp3008Spi.h"
+#include "./rpiPWM1/rpiPWM1.h"
+#include "./GPIOClass/GPIOClass.h"
 
-#include <math.h>
-#include <unistd.h>
-#include <stdio.h>
-#include <signal.h>
 #include <string>
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <math.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <signal.h>
 
 #include "ArduiPi_OLED_lib.h"
 #include "Adafruit_GFX.h"
 #include "ArduiPi_OLED.h"
 
 using namespace std::literals::chrono_literals;
-
-volatile sig_atomic_t stop;
-void inthand(int signum)
-{
-    stop = 1;
-}
 
 const int LOGO16_GLCD_HEIGHT = 16;
 const int LOGO16_GLCD_WIDTH  = 16; 
@@ -43,6 +39,12 @@ static unsigned char logo16_glcd_bmp[] =
 
 // Instantiate the display
 ArduiPi_OLED display;
+
+volatile sig_atomic_t stop;
+void inthand(int signum)
+{
+    stop = 1;
+}
 
 /***********************************************************************
  * This function returns one value from the provided ADC channel.
@@ -136,7 +138,7 @@ float convert_a2d_to_temp(int a2dVal, const char units='C', std::string solver="
 }
 
 /***********************************************************************
- * Display text.
+ * Display text passed to function on OLED.
  * 
  * *********************************************************************/
 
@@ -162,22 +164,41 @@ int main(void)
 {
     signal(SIGINT, inthand);
 
+    // Initialize display
     const int OLED_TYPE = 0; // OLED_ADAFRUIT_SPI_128x32
     const int OLED_SPI_DC = 6; // RPI GPIO 6 pin 31
     const int OLED_SPI_RESET = 26; // RPI GPIO 26 pin 37
     const int OLED_SPI_CS = 1; // BCM2835_SPI_CS1
-
     if ( !display.init(OLED_SPI_DC, OLED_SPI_RESET, OLED_SPI_CS, OLED_TYPE) )
          exit(EXIT_FAILURE);
-
     display.begin();
+
+    // Initialize PWM
+    float duty_cycle = 95;
+    rpiPWM1 pwm(1000.0, 256, duty_cycle, rpiPWM1::MSMODE);
+
+    // Initialize H-Bridge direction
+    enum Mode
+    {
+      HEAT = 1, 
+      COOL = 2 
+    };
+    int mode = 2;
+    GPIOClass* gpio23 = new GPIOClass("23");
+    gpio23->export_gpio(); //export GPIO23
+    gpio23->setdir_gpio("out");
+    switch(mode)
+    {
+        case HEAT:
+            gpio23->setval_gpio("1");
+        case COOL:
+            gpio23->setval_gpio("0");
+    }
 
     int channel = 0;
     int a2d_val = 0;
     int temp_F = 0;
-
-    // temp conversion options
-    char units_F = 'F';
+    char units_F = 'F'; // temp conversion options
     // std::string solver_Beta = "Beta";
 
     while (!stop)
@@ -192,6 +213,7 @@ int main(void)
 	std::this_thread::sleep_for(5s);
     }
 
+    pwm.setDutyCycleCount(0); // Duty Cycle to 0%
     display.close();
 
     return 0;
