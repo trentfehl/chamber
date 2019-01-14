@@ -15,3 +15,6 @@ MCP3008, PWM, and GPIO functions were borrowed from the well documented site her
  - http://www.hertaville.com/interfacing-an-spi-adc-mcp3008-chip-to-the-raspberry-pi-using-c.html
  - http://www.hertaville.com/rpipwm.html
  - http://www.hertaville.com/introduction-to-accessing-the-raspberry-pis-gpio-in-c.html
+
+PID controller code was borrowed from here:
+ - https://gist.github.com/bradley219/5373998
