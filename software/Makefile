@@ -1,5 +1,5 @@
 #*********************************************************************
-# This is the makefile for 
+# This is the makefile for chamber application and its dependencies
 # *********************************************************************
 
 # Makefile dir
@@ -20,7 +20,7 @@ CFLAGS=${CCFLAGS}
 all: ${PROGRAMS}
 
 ${PROGRAMS}: ${SOURCES}
-	$(CXX) $(CFLAGS) -lArduiPi_OLED $(SUPPORT) $@.cpp -o $@.exe
+	$(CXX) $(CFLAGS) -lArduiPi_OLED -lpigpio $(SUPPORT) $@.cpp -o $@.exe
 
 clean:
 	rm -rf $(PROGRAMS)
