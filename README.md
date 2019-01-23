@@ -8,7 +8,7 @@ starter care, pickling, and others.
 
 ### Software Requirements
  - https://github.com/hallard/ArduiPi_OLED 
-
+ - https://github.com/joan2937/pigpio
 
 ##### Acknowledgements
 MCP3008, PWM, and GPIO functions were borrowed from the well documented site here: 

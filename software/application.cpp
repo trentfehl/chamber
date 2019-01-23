@@ -7,6 +7,8 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <numeric>
+#include <vector>
 #include <mutex>
 #include <condition_variable>
 #include <math.h>
@@ -14,6 +16,7 @@
 #include <stdio.h>
 #include <signal.h>
 
+#include "pigpio.h"
 #include "ArduiPi_OLED_lib.h"
 #include "Adafruit_GFX.h"
 #include "ArduiPi_OLED.h"
@@ -31,9 +34,13 @@ std::condition_variable cv;
 std::chrono::system_clock::time_point start_time;
 std::chrono::duration<double> diff;
 
-double control_cycle = 0.500; //seconds
 volatile sig_atomic_t stop;
-const int TEMP0 = 0;
+double control_cycle = 0.500; //seconds
+int temp_target = 23;
+std::vector<int> channels{0,2};
+std::vector<float> temps(8, 0);
+unsigned int incInputGpio = 5;
+unsigned int decInputGpio = 16;
 enum Mode
 {
   HEAT = 1, 
@@ -76,7 +83,7 @@ int get_a2d_val(int Channel)
  * Returns:
  *  temp - float temperature in Celsius 
  * *********************************************************************/
-float get_temp(void)
+float get_temp(int channel = 0)
 {
     float temp_K, v_t, r_t;
     double r_norm;
@@ -96,7 +103,7 @@ float get_temp(void)
     const double D = 7.3003206E-08;
 
     // Get reading from ADC
-    int a2dVal = get_a2d_val(TEMP0);
+    int a2dVal = get_a2d_val(channel);
 
     v_t = a2dVal * V_REF / 1023; // input voltage at temp
     r_t = R_f * v_t / (V_REF - v_t); // thermistor resistance at temp
@@ -130,7 +137,7 @@ int display_text(const char * string)
     display.display();
 
     // text display tests
-    display.setTextSize(2);
+    display.setTextSize(1);
     display.setTextColor(WHITE);
     display.setCursor(0,0);
     display.print(text);
@@ -169,6 +176,7 @@ void dt_control()
 
     diff = std::chrono::system_clock::now() - start_time;
 
+    // Wait until control cycle is up
     while (diff.count() < control_cycle){
         diff = std::chrono::system_clock::now() - start_time;
     }
@@ -181,11 +189,44 @@ void dt_control()
     cv.notify_one();
 }
 
+/***********************************************************************
+ * Increase temperature setpoint  
+ * *********************************************************************/
+void increase_setpoint(int gpio, int level, uint32_t tick)
+{
+    if(level == 0) // Only increment on the falling edge.
+    {
+        temp_target++;
+	std::cout << "GPIO triggered: " << gpio << std::endl;
+    }
+}
+
+/***********************************************************************
+ * Decrease temperature setpoint  
+ * *********************************************************************/
+void decrease_setpoint(int gpio, int level, uint32_t tick)
+{
+    if(level == 0) // Only decrement on the falling edge.
+    {
+        temp_target--;
+	std::cout << "GPIO triggered: " << gpio << std::endl;
+    }
+}
+
+/***********************************************************************
+ * Print contents of a vector.  
+ * *********************************************************************/
+void print(std::vector<float> const &input)
+{
+    for (auto const& i: input) {
+        std::cout << i << " ";
+    }
+}
+
 int main(void)
 {
     std::string mode;
-    int temp, loop_count = 0;
-    double temp_target = 23;
+    int chan, loop_count = 0;
 
     // Initialize display
     display_init();
@@ -198,6 +239,13 @@ int main(void)
     GPIOClass* gpio23 = new GPIOClass("23");
     gpio23->export_gpio();
     gpio23->setdir_gpio("out");
+
+    // Initialize GPIO callbacks for setpoints
+    gpioInitialise();
+    gpioSetMode(incInputGpio,PI_INPUT);
+    gpioSetMode(decInputGpio,PI_INPUT);
+    gpioSetAlertFunc(incInputGpio, increase_setpoint);
+    gpioSetAlertFunc(decInputGpio, decrease_setpoint);
 
     // Initialize PID controller
     PID pid = PID(control_cycle, 99.9, -99.9, 2.0, 0.1, 0.3);
@@ -220,15 +268,21 @@ int main(void)
         }
         cv.notify_one();
 
-
 	// Update temperature
-        temp = static_cast<int>(get_temp());
+	for(std::size_t i=0; i<channels.size(); ++i)
+	{
+            chan = channels[i];
+	    temps[chan] = get_temp(chan);
+	}
+
+	int temp = static_cast<int>(std::accumulate(temps.begin(), temps.end(), 0.0) / channels.size());
 
 	// Display and print temperature at reduced loop rate
 	if (loop_count == 0 or loop_count % 10 == 0){
-            std::string text = "Temp: " + std::to_string(temp) + (char)247 + "C";
-            display_text(text.c_str());
-	    std::cout << text << " Target: " << temp_target << "C" << std::endl;
+            std::string text = "Temp: " + std::to_string(temp) + (char)247 + "C\n" +
+		               "     (" + std::to_string(temp_target) + (char)247 + "C)";
+	    display_text(text.c_str());
+	    std::cout << text << std::endl;
 	    std::cout << "Duty cycle: " << duty_cycle << " Mode: " << mode << std::endl;
 	}
 
