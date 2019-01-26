@@ -1,6 +1,4 @@
 #include "./mcp3008/mcp3008Spi.h"
-#include "./rpiPWM1/rpiPWM1.h"
-#include "./GPIOClass/GPIOClass.h"
 #include "./pid/pid.h"
 
 #include <string>
@@ -39,14 +37,19 @@ double control_cycle = 0.500; //seconds
 int temp_target = 23;
 std::vector<int> channels{0,2};
 std::vector<float> temps(8, 0);
+unsigned int ModeGpio = 23;
 unsigned int incInputGpio = 5;
 unsigned int decInputGpio = 16;
 enum Mode
 {
+  REST = 0,
   HEAT = 1, 
-  COOL = 2 
+  COOL = 2
 };
 
+/***********************************************************************
+ * Interruption handler for CTRL-C quit.
+ * *********************************************************************/
 void inthand(int signum)
 {
     stop = 1;
@@ -226,29 +229,24 @@ void print(std::vector<float> const &input)
 int main(void)
 {
     std::string mode;
+    float duty_cycle = 0;
     int chan, loop_count = 0;
 
     // Initialize display
     display_init();
 
-    // Initialize PWM
-    float duty_cycle = 10.0;
-    rpiPWM1 pwm(1000.0, 256, duty_cycle, rpiPWM1::MSMODE);
+    // Initialize GPIOs
+    if (gpioInitialise() < 0) return 1;
+    gpioSetMode(ModeGpio,PI_OUTPUT); // Controls Peltier directions
+    gpioSetMode(incInputGpio,PI_INPUT); // Increase setpoint
+    gpioSetMode(decInputGpio,PI_INPUT); // Decrease setpoint
 
-    // Initialize H-Bridge direction control pin
-    GPIOClass* gpio23 = new GPIOClass("23");
-    gpio23->export_gpio();
-    gpio23->setdir_gpio("out");
-
-    // Initialize GPIO callbacks for setpoints
-    gpioInitialise();
-    gpioSetMode(incInputGpio,PI_INPUT);
-    gpioSetMode(decInputGpio,PI_INPUT);
+    // Callbacks for setpoint
     gpioSetAlertFunc(incInputGpio, increase_setpoint);
     gpioSetAlertFunc(decInputGpio, decrease_setpoint);
 
     // Initialize PID controller
-    PID pid = PID(control_cycle, 99.9, -99.9, 2.0, 0.1, 0.3);
+    PID pid = PID(control_cycle, 100, -100, 8.0, 0.1, 0.3);
 
     // Handle CTRL-C interrupt from keyboard
     signal(SIGINT, inthand);
@@ -261,7 +259,7 @@ int main(void)
         std::thread worker(dt_control);
  
 	start_time = std::chrono::system_clock::now();
-        // send data to the worker thread
+        // Send data to the worker thread
         {
             std::lock_guard<std::mutex> lk(m);
             main_ready = true;
@@ -277,31 +275,34 @@ int main(void)
 
 	int temp = static_cast<int>(std::accumulate(temps.begin(), temps.end(), 0.0) / channels.size());
 
+	// Get the new control state and set PWMs
+        duty_cycle = pid.calculate(temp_target, temp);
+        gpioHardwarePWM(18, 5E5, (10000 * std::abs(duty_cycle))); // Peltier
+        gpioHardwarePWM(19, 5E5, (10000 * std::abs(duty_cycle))); // Fans on GPIO 13, 19
+
+	// Set mode and Peltier direction based on duty cycle sign
+	if (duty_cycle > 25){
+            gpioWrite(23, 1);
+	    mode = "HEAT";
+	} else if (duty_cycle < -25){
+            gpioWrite(23, 0);
+	    mode = "COOL";
+	} else {
+	    // Rest to improve efficiency and stay quiet
+            gpioHardwarePWM(18, 0, 0);
+            gpioHardwarePWM(19, 0, 0);
+	    mode = "REST";
+	}
+	    
 	// Display and print temperature at reduced loop rate
 	if (loop_count == 0 or loop_count % 10 == 0){
-            std::string text = "Temp: " + std::to_string(temp) + (char)247 + "C\n" +
+            std::string text = "Temp: " + std::to_string(temp) + (char)247 + "C | Mode: " + mode + "\n" +
 		               "     (" + std::to_string(temp_target) + (char)247 + "C)";
 	    display_text(text.c_str());
 	    std::cout << text << std::endl;
 	    std::cout << "Duty cycle: " << duty_cycle << " Mode: " << mode << std::endl;
 	}
 
-	// Set new control state
-        duty_cycle = pid.calculate(temp_target, temp);
-
-	if (duty_cycle > 0){
-            gpio23->setval_gpio("1");
-	    mode = "HEAT";
-	} else if (duty_cycle < 0){
-            gpio23->setval_gpio("0");
-	    mode = "COOL";
-	} else {
-            duty_cycle = 1; // Duty Cycle low but non-zero
-	}
-
-	duty_cycle = std::abs(duty_cycle);
-        pwm.setDutyCycleCount(duty_cycle);
-	    
         // Wait for end of control cycle
         {
             std::unique_lock<std::mutex> lk(m);
@@ -312,8 +313,10 @@ int main(void)
         loop_count++;
     }
 
-    pwm.setDutyCycleCount(0); // Duty Cycle to 0%
+    gpioHardwarePWM(18, 0, 0);
+    gpioHardwarePWM(19, 0, 0);
     display.close();
+    gpioTerminate();
 
     return 0;
 }
