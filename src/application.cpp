@@ -277,22 +277,16 @@ int main(void) {
         }
 
         // Display and print temperature at reduced loop rate.
-        if (loop_count == 0 || loop_count % 20 == 0) {
+        if (loop_count == 0 || loop_count % 10 == 0) {
             std::string text = "Temp: " + std::to_string(static_cast<int>(round(temp))) + (char)247 + "C | " + mode + "ING\n" +
                                "     (" + std::to_string(temp_target) + (char)247 + "C)";
             display_text(text.c_str());
             std::cout << text << std::endl;
-
-            // fan_duty = fmin((std::abs(peltier_duty) + 50), 100); 
-            // gpioHardwarePWM(FanPWM, 5E5, (10000 * fan_duty)); 
-
         }
 
         std::cout << "Target: " << temp_target << std::endl;
         std::cout << "Temp: " << temp << std::endl;
         std::cout << "Mode: " << mode << std::endl;
-        // std::cout << "Peltier: " << peltier_duty << std::endl;
-        // std::cout << "Fans: " << fan_duty << std::endl;
         std::cout << "=============" << std::endl;
 
         // Wait for end of control cycle.
