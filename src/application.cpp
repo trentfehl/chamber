@@ -1,30 +1,10 @@
-// This is free and unencumbered software released into the public domain.
-// Anyone is free to copy, modify, publish, use, compile, sell, or
-// distribute this software, either in source code form or as a compiled
-// binary, for any purpose, commercial or non-commercial, and by any
-// means.
-// In jurisdictions that recognize copyright laws, the author or authors
-// of this software dedicate any and all copyright interest in the
-// software to the public domain. We make this dedication for the benefit
-// of the public at large and to the detriment of our heirs and
-// successors. We intend this dedication to be an overt act of
-// relinquishment in perpetuity of all present and future rights to this
-// software under copyright law.
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-// IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-// OTHER DEALINGS IN THE SOFTWARE.
-// For more information, please refer to <http://unlicense.org/>
-
 #include <math.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <signal.h>
 
 #include <string>
+#include <cmath>
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -34,7 +14,6 @@
 #include <condition_variable>
 
 #include "./mcp3008/mcp3008Spi.h"
-#include "./pid/pid.h"
 #include "pigpio.h"
 #include "ArduiPi_OLED_lib.h"
 #include "Adafruit_GFX.h"
@@ -56,16 +35,12 @@ std::chrono::duration<double> diff;
 volatile sig_atomic_t stop;
 double control_cycle = 0.500;  // Seconds
 int temp_target = 23;
-std::vector<int> channels(0, 2);
 std::vector<float> temps(8, 0);
 unsigned int ModeGpio = 23;
 unsigned int incInputGpio = 5;
 unsigned int decInputGpio = 16;
-enum Mode{
-  REST = 0,
-  HEAT = 1,
-  COOL = 2
-};
+unsigned int FanPWM = 18;
+unsigned int PeltierPWM = 19;
 
 // Interruption handler for CTRL-C quit.
 void inthand(int signum) { stop = 1; }
@@ -207,8 +182,14 @@ void decrease_setpoint(int gpio, int level, uint32_t tick) {
 
 int main(void) {
     std::string mode;
-    int chan, temp, loop_count = 0;
-    float sum, duty_cycle = 0;
+    int chan = 0;
+    int loop_count = 0;
+    int flip_flop = 0;
+    float sum, temp = 0;
+    int duty_cycle_inner, duty_cycle_peltier_outer, samples;
+
+    // ADC channels reading temperatures
+    std::vector<int> channels{0, 2};
 
     // Initialize display.
     display_init();
@@ -223,9 +204,10 @@ int main(void) {
     gpioSetAlertFunc(incInputGpio, increase_setpoint);
     gpioSetAlertFunc(decInputGpio, decrease_setpoint);
 
-    // Initialize PID controller.
-    PID pid = PID(control_cycle, 100, -100, 8.0, 0.1, 0.3);
-
+    // Set fixed duty cycles
+    duty_cycle_inner = 50; // Inner fan
+    duty_cycle_peltier_outer = 100; // Peltier and outer fan
+        
     // Handle CTRL-C interrupt from keyboard.
     signal(SIGINT, inthand);
 
@@ -242,42 +224,76 @@ int main(void) {
         }
         cv.notify_one();
 
-        // Update temperature.
-        for (std::size_t i = 0; i < channels.size(); ++i) {
-            chan = channels[i];
-            temps[chan] = get_temp(chan);
+        // Update temperature reading.
+        temp = 0;
+        samples = 20;
+        for (int j = 0; j < samples; ++j){
+
+            // Average temperatures from all channels.
+            for (std::size_t i = 0; i < channels.size(); ++i) {
+                chan = channels[i];
+                temps[chan] = get_temp(chan);
+            }
+
+            sum = std::accumulate(temps.begin(), temps.end(), 0.0);
+            temp += (sum / channels.size());
+        } 
+
+        // Average temperatures from all samples.
+        temp = temp / samples;
+
+        // Don't update mode unless away from target temp or not in Rest
+        if ((std::abs(temp - temp_target) > 1) || mode != "REST"){
+
+            // Set direction and mode
+            if (temp > temp_target){
+
+                if (mode == "HEAT"){
+                    flip_flop++;
+                } else {
+                    gpioWrite(23, 1);
+                    mode = "COOL";
+                }
+            } else {
+
+                if (mode == "COOL"){
+                    flip_flop++;
+                } else {
+                    gpioWrite(23, 0);
+                    mode = "HEAT";
+                }
+            }
         }
 
-        sum = std::accumulate(temps.begin(), temps.end(), 0.0);
-        temp = static_cast<int>(sum / channels.size());
-
-        // Get the new control state and set PWMs.
-        duty_cycle = pid.calculate(temp_target, temp);
-        gpioHardwarePWM(18, 5E5, (10000 * std::abs(duty_cycle)));  // Peltier
-        gpioHardwarePWM(19, 5E5, (10000 * std::abs(duty_cycle)));  // Fans: GPIO 13, 19
-
-        // Set mode and Peltier direction based on duty cycle sign.
-        if (duty_cycle > 25) {
-            gpioWrite(23, 1);
-            mode = "HEAT";
-        } else if (duty_cycle < -25) {
-            gpioWrite(23, 0);
-            mode = "COOL";
+        if (flip_flop > 0 || mode == "REST"){
+           // Disable fans and Peltier near target temp.
+           gpioHardwarePWM(FanPWM, 0, 0);
+           gpioHardwarePWM(PeltierPWM, 0, 0);
+           flip_flop = 0;
+           mode = "REST";
         } else {
-            // Disable fans and Peltier in low efficiency states.
-            gpioHardwarePWM(18, 0, 0);
-            gpioHardwarePWM(19, 0, 0);
-            mode = "REST";
+           gpioHardwarePWM(FanPWM, 5E5, (10000 * duty_cycle_inner));
+           gpioHardwarePWM(PeltierPWM, 5E5, (10000 * duty_cycle_peltier_outer));
         }
 
         // Display and print temperature at reduced loop rate.
-        if (loop_count == 0 || loop_count % 10 == 0) {
-            std::string text = "Temp: " + std::to_string(temp) + (char)247 + "C | Mode: " + mode + "\n" +
+        if (loop_count == 0 || loop_count % 20 == 0) {
+            std::string text = "Temp: " + std::to_string(static_cast<int>(round(temp))) + (char)247 + "C | " + mode + "ING\n" +
                                "     (" + std::to_string(temp_target) + (char)247 + "C)";
             display_text(text.c_str());
             std::cout << text << std::endl;
-            std::cout << "Duty cycle: " << duty_cycle << " Mode: " << mode << std::endl;
+
+            // fan_duty = fmin((std::abs(peltier_duty) + 50), 100); 
+            // gpioHardwarePWM(FanPWM, 5E5, (10000 * fan_duty)); 
+
         }
+
+        std::cout << "Target: " << temp_target << std::endl;
+        std::cout << "Temp: " << temp << std::endl;
+        std::cout << "Mode: " << mode << std::endl;
+        // std::cout << "Peltier: " << peltier_duty << std::endl;
+        // std::cout << "Fans: " << fan_duty << std::endl;
+        std::cout << "=============" << std::endl;
 
         // Wait for end of control cycle.
         {
@@ -289,8 +305,8 @@ int main(void) {
         loop_count++;
     }
 
-    gpioHardwarePWM(18, 0, 0);
-    gpioHardwarePWM(19, 0, 0);
+    gpioHardwarePWM(FanPWM, 0, 0);
+    gpioHardwarePWM(PeltierPWM, 0, 0);
     display.close();
     gpioTerminate();
 

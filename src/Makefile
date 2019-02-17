@@ -6,7 +6,7 @@
 ROOT_DIR:=$(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
 CCFLAGS=-std=c++14 -Wall -Ofast -pthread
-SUPPORT=./mcp3008/mcp3008Spi.cpp ./pid/pid.cpp
+SUPPORT=./mcp3008/mcp3008Spi.cpp
 
 prefix := /usr/local/
 
