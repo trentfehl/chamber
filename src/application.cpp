@@ -242,6 +242,13 @@ int main(void) {
         // Average temperatures from all samples.
         temp = temp / samples;
 
+        // If temperature too high, exit.
+        if (temp > 40){
+            gpioHardwarePWM(PeltierPWM, 0, 0);
+            printf ("Temperature too high.");
+            exit (EXIT_FAILURE);
+        }
+
         // Don't update mode unless away from target temp or not in Rest
         if ((std::abs(temp - temp_target) > 1) || mode != "REST"){
 
@@ -266,14 +273,14 @@ int main(void) {
         }
 
         if (flip_flop > 0 || mode == "REST"){
-           // Disable fans and Peltier near target temp.
-           gpioHardwarePWM(FanPWM, 0, 0);
-           gpioHardwarePWM(PeltierPWM, 0, 0);
-           flip_flop = 0;
-           mode = "REST";
+            // Disable fans and Peltier near target temp.
+            gpioHardwarePWM(FanPWM, 0, 0);
+            gpioHardwarePWM(PeltierPWM, 0, 0);
+            flip_flop = 0;
+            mode = "REST";
         } else {
-           gpioHardwarePWM(FanPWM, 5E5, (10000 * duty_cycle_inner));
-           gpioHardwarePWM(PeltierPWM, 5E5, (10000 * duty_cycle_peltier_outer));
+            gpioHardwarePWM(FanPWM, 5E5, (10000 * duty_cycle_inner));
+            gpioHardwarePWM(PeltierPWM, 5E5, (10000 * duty_cycle_peltier_outer));
         }
 
         // Display and print temperature at reduced loop rate.
