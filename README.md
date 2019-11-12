@@ -3,6 +3,9 @@ Kitchen countertop thermal chamber used for longer duration culinary
 processes that require precise temperature control such as sourdough 
 starter care, pickling, and others.
 
+This project was accepted as a demo presentation at the 2019 Hackaday
+Superconference. The presentation can be found here: https://docs.google.com/presentation/d/1pnsGfKx_trj58ampCZZywA2gX1rxPGUsQPXvuTJ43v0/edit?usp=sharing
+
 ### Roadmap
  - Switch controlled interior lights
  - Custom PCB to reduce cost and clean up look
