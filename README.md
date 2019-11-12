@@ -9,7 +9,7 @@ starter care, pickling, and others.
  - Mechanical design improvements: hinged door, stackable, insulation
 
 ### Hardware Block Diagram
-![block_diagram](concept/block_diagram_20190106.jpg)
+![block_diagram](concept/block_diagram_20191107.png)
 
 ### Software Requirements
  - https://github.com/hallard/ArduiPi_OLED 
