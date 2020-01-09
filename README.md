@@ -17,7 +17,3 @@ Superconference. The presentation can be found here: https://docs.google.com/pre
 ### Software Requirements
  - https://github.com/hallard/ArduiPi_OLED 
  - https://github.com/joan2937/pigpio
-
-##### Acknowledgements
-MCP3008 functions were borrowed from the well documented site here: 
- - http://www.hertaville.com/interfacing-an-spi-adc-mcp3008-chip-to-the-raspberry-pi-using-c.html
